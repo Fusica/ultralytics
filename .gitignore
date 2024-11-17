@@ -15,4 +15,7 @@ runs/
 *.webm
 *.pt
 
-*.DS_Store
+.DS_Store
+*/.DS_Store
+._.DS_Store
+**/.DS_Store
