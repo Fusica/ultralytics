@@ -37,9 +37,6 @@ def depth_callback(depth_msg):
     latest_depth_image = bridge.imgmsg_to_cv2(depth_msg, desired_encoding="passthrough")
 
 
-import numpy as np
-
-
 def calculate_distance(depth_image, bbox):
     x1, y1, x2, y2 = map(int, bbox)
 
@@ -133,6 +130,6 @@ if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        print("Shutting down")
+        rospy.loginfo("Shutting down")
     finally:
         cv2.destroyAllWindows()
