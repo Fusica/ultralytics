@@ -1,8 +1,11 @@
 #!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
 import rospy
 import numpy as np
 import cv2
-from geometry_msgs.msg import Float32MultiArray, MultiArrayDimension
+from std_msgs.msg import Float32MultiArray, MultiArrayDimension
+from geometry_msgs.msg import PoseStamped
 from tf.transformations import euler_from_quaternion, quaternion_matrix
 from ultralytics import YOLO
 from threading import Thread
@@ -138,7 +141,7 @@ class ObjectLocalizer:
         self.stream_loader = LoadStreams(sources)
 
         # 加载YOLO模型
-        self.yolo = YOLO("/home/max/ultralytics/runs/detect/tank/weights/best.pt")
+        self.yolo = YOLO("yolov8n.pt")
 
         # 相机内参 (需要根据实际相机参数调整)
         self.camera_matrix = np.array(
