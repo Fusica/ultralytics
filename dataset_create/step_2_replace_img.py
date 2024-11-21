@@ -23,10 +23,10 @@ def replace_images(dataset_root, original_images_dir):
 
 
 # Specify the root directory of your dataset
-dataset_root = "/Volumes/Data_WD/弹群检测/4k采集数据/warfare_4k.v2i.yolov8"
+dataset_root = "/Users/max/Downloads/warfare_soldier"
 
 # Specify the directory containing the original (uncompressed) images
-original_images_dir = "/Volumes/Data_WD/弹群检测/4k采集数据/slice_4"
+original_images_dir = "/Users/max/Downloads/extracted_images"
 
 # Call the function
 replace_images(dataset_root, original_images_dir)

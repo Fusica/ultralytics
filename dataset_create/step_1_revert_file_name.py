@@ -4,7 +4,7 @@ import re
 
 def rename_files(root_dir):
     # Compile the regex pattern to match the file names
-    pattern = re.compile(r"(frame_\d{6}).*\.(jpg|txt)")
+    pattern = re.compile(r"(.+?)_jpg\..*\.(jpg|txt)")
 
     # Walk through all directories
     for dirpath, dirnames, filenames in os.walk(root_dir):
@@ -23,7 +23,7 @@ def rename_files(root_dir):
 
 
 # Specify the root directory where your folders are located
-root_directory = "/Volumes/Data_WD/弹群检测/4k采集数据/warfare_4k.v2i.yolov8"
+root_directory = "/Users/max/Downloads/warfare_soldier"
 
 # Call the function
 rename_files(root_directory)
