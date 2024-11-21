@@ -8,6 +8,7 @@ from cv_bridge import CvBridge
 from ultralytics import YOLO
 import logging
 from geometry_msgs.msg import PoseStamped, Point
+import math
 
 LOGGER = logging.getLogger(__name__)
 
@@ -32,52 +33,49 @@ class ObjectLocalizer:
             ]
         )
 
-        # 相机到机体的变换（相机朝前，与机体系一致）
-        self.R_B_C = np.array(
-            [
-                [1.0, 0.0, 0.0],
-                [0.0, 1.0, 0.0],
-                [0.0, 0.0, 1.0],
-            ]
-        )
-        self.t_B_C = np.array([[0.0], [0.0], [0.0]])
-
-        # 固��高度
-        self.fixed_height = 0.8  # meters
-
-        # 从相机内参矩阵中提取焦距和光心
+        # 提取相机内参
         self.fx = self.camera_matrix[0, 0]
         self.fy = self.camera_matrix[1, 1]
         self.cx = self.camera_matrix[0, 2]
         self.cy = self.camera_matrix[1, 2]
 
+        # 相机到机体的变换（相机朝前，与机体系一致）
+        self.R_B_C = np.eye(3)
+        self.t_B_C = np.zeros((3, 1))
+
+        # 无人机高度初始化
+        self.fixed_height = 0.8  # 默认高度，单位：米
+
         # 发布器和订阅器
         self.object_pub = rospy.Publisher("/detected_objects", Float32MultiArray, queue_size=10)
         self.coordinates_pub = rospy.Publisher("/coord", Point, queue_size=10)
         self.image_sub = rospy.Subscriber("/camera/image_raw", Image, self.image_callback, queue_size=1)
-        # self.height_sub = rospy.Subscriber("/mavros/local_position/pose", PoseStamped, self.height_callback)
+        self.height_sub = rospy.Subscriber("/mavros/local_position/pose", PoseStamped, self.height_callback)
 
-    def calculate_3d_position(self, pixel_x, pixel_y, bbox_width, bbox_height):
+    def calculate_3d_position(self, pixel_x, pixel_y):
         """
-        根据物体的像素尺寸和实际尺寸计算物体在相机坐标系下的3D位置
+        根据物体中心的像素坐标、相机内参和无人机高度计算物体在机体坐标系下的三维坐标。
         """
-        # 已知物体的实际尺寸（单位：米）
-        real_height = 0.19  # 19厘米
-        real_width = 0.07  # 7厘米
+        # 获取无人机高度（相机高度）
+        h = self.fixed_height
 
-        # 利用相似三角形计算距离
-        distance_height = (self.fy * real_height) / bbox_height
-        distance_width = (self.fx * real_width) / bbox_width
-        distance = (distance_height + distance_width) / 2
+        # 计算相对于光心的像素偏移量
+        delta_x = pixel_x - self.cx
+        delta_y = pixel_y - self.cy
 
-        # 计算相机坐标系下的X和Y
-        x = ((pixel_x - self.cx) * distance) / self.fx
-        y = ((pixel_y - self.cy) * distance) / self.fy
-        z = distance
+        # 计算偏移角度（弧度）
+        theta_x = math.atan(delta_x / self.fx)
+        theta_y = math.atan(delta_y / self.fy)
+
+        # 计算相机坐标系下的 x 和 y（物体位于地平面，z=0）
+        # 相机高度为 h，物体高度为 0，因此：
+        x = h * math.tan(theta_x)
+        y = h * math.tan(theta_y)
+        z = 0  # 物体位于地平面
 
         position = np.array([x, y, z])
 
-        # 发布 Point 消息
+        # 发布 Point 消息（可选）
         point_msg = Point()
         point_msg.x = float(position[0])
         point_msg.y = float(position[1])
@@ -91,7 +89,7 @@ class ObjectLocalizer:
         处理无人机高度信息
         """
         try:
-            # 从 PoseStamped 消息中获取 z 轴位置
+            # 从 PoseStamped 消息中获取 z 轴位置（相对于起飞点的高度）
             self.fixed_height = msg.pose.position.z
 
             # 确保高度为正值且在合理范围内
@@ -111,7 +109,7 @@ class ObjectLocalizer:
             frame = self.bridge.imgmsg_to_cv2(msg, "bgr8")
 
             # YOLO检测
-            results = self.yolo(frame, imgsz=1280)[0]
+            results = self.yolo(frame, imgsz=640)[0]
             detections = []
 
             # 处理每个检测结果
@@ -122,26 +120,17 @@ class ObjectLocalizer:
                 # 获取类别ID
                 class_id = int(det.cls[0])
 
-                # 获取边界框中心点（直接使用，不需要映射）
+                # 获取边界框中心点
                 bbox = det.xyxy[0].cpu().numpy()
                 center_x = (bbox[0] + bbox[2]) / 2
                 center_y = (bbox[1] + bbox[3]) / 2
-                bbox_width = bbox[2] - bbox[0]
-                bbox_height = bbox[3] - bbox[1]
-
-                # 添加调试信息来验证坐标
-                # rospy.loginfo(f"Detection box coordinates: {bbox}")
-                # rospy.loginfo(f"Center point: ({center_x}, {center_y})")
 
                 # 计算3D位置
-                position = self.calculate_3d_position(center_x, center_y, bbox_width, bbox_height)
+                position = self.calculate_3d_position(center_x, center_y)
 
                 # 相机坐标系到机体坐标系转换
                 p_C = position.reshape(3, 1)
                 p_B = self.R_B_C @ p_C + self.t_B_C
-
-                # 添加调试信息
-                # rospy.loginfo(f"Body frame position: x={p_B[0][0]:.2f}m, y={p_B[1][0]:.2f}m, z={p_B[2][0]:.2f}m")
 
                 # 将检测结果添加到列表中 [class_id, x, y, z]
                 detections.append([float(class_id), float(p_B[0][0]), float(p_B[1][0]), float(p_B[2][0])])
