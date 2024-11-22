@@ -34,6 +34,8 @@ class ObjectLocalizer:
             ]
         )
 
+        self.dist_coeffs = np.array([0.09693897, -0.02769597, 0.00659544, -0.03210938])
+
         # 提取相机内参
         self.fx = self.camera_matrix[0, 0]
         self.fy = self.camera_matrix[1, 1]
@@ -59,16 +61,38 @@ class ObjectLocalizer:
         # 添加位姿订阅
         self.pose_sub = rospy.Subscriber("/mavros/local_position/pose", PoseStamped, self.drone_pose_callback)
 
+    def undistort_pixel(self, pixel_x, pixel_y):
+        # 相机内参矩阵
+        K = np.array([[self.fx, 0, self.cx], [0, self.fy, self.cy], [0, 0, 1]])
+
+        # 畸变系数
+        dist_coeffs = np.array([self.k1, self.k2, self.p1, self.p2])
+
+        # 像素坐标
+        pts = np.array([[[pixel_x, pixel_y]]], dtype=np.float32)
+
+        # 去畸变
+        undistorted_pts = cv2.undistortPoints(pts, K, dist_coeffs, P=K)
+
+        # 提取去畸变后的像素坐标
+        undistorted_x = undistorted_pts[0][0][0]
+        undistorted_y = undistorted_pts[0][0][1]
+
+        return undistorted_x, undistorted_y
+
     def calculate_3d_position(self, pixel_x, pixel_y):
         """
-        根据物体中心的像素坐标、相机内参和无人机高度计算物体在机体坐标系下的三维坐标。
+        根据物体底部的像素坐标、相机内参和无人机高度计算物体在机体坐标系下的三维坐标。
         """
         # 获取无人机高度（相机高度）
         h = self.height
 
+        # 去畸变像素坐标
+        undistorted_x, undistorted_y = self.undistort_pixel(pixel_x, pixel_y)
+
         # 计算相对于光心的像素偏移量
-        delta_x = pixel_x - self.cx
-        delta_y = pixel_y - self.cy
+        delta_x = undistorted_x - self.cx
+        delta_y = undistorted_y - self.cy
 
         # 计算偏移角度（弧度）
         theta_x = math.atan(delta_x / self.fx)
@@ -175,9 +199,10 @@ class ObjectLocalizer:
                 bbox = det.xyxy[0].cpu().numpy()
                 center_x = (bbox[0] + bbox[2]) / 2
                 center_y = (bbox[1] + bbox[3]) / 2
+                bottom_y = bbox[3]
 
                 # 计算3D位置（机体坐标系）
-                position = self.calculate_3d_position(center_x, center_y)
+                position = self.calculate_3d_position(center_x, bottom_y)
                 p_C = position.reshape(3, 1)
                 p_B = self.R_B_C @ p_C + self.t_B_C
 
