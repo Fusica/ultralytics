@@ -9,7 +9,7 @@ from ultralytics import YOLO
 import logging
 from geometry_msgs.msg import PoseStamped, Point
 import math
-from tf.transformations import quaternion_matrix, euler_from_quaternion
+from tf.transformations import quaternion_matrix
 
 LOGGER = logging.getLogger(__name__)
 
@@ -34,20 +34,30 @@ class ObjectLocalizer:
             ]
         )
 
+        self.dist_coeffs = np.array([0.09693897, -0.02769597, 0.00659544, -0.03210938])
+        self.k1 = self.dist_coeffs[0]
+        self.k2 = self.dist_coeffs[1]
+        self.p1 = self.dist_coeffs[2]
+        self.p2 = self.dist_coeffs[3]
+
         # 提取相机内参
         self.fx = self.camera_matrix[0, 0]
         self.fy = self.camera_matrix[1, 1]
         self.cx = self.camera_matrix[0, 2]
         self.cy = self.camera_matrix[1, 2]
 
-        # TODO 相机到机体的变换（相机朝前，与机体系一致），需要每次校准外参
-        self.R_B_C = np.eye(3)
+        # 相机到机体的变换（相机朝前，与机体系一致）
+        self.R_B_C = np.array(
+            [
+                [0.0, 0.0, 1.0],
+                [1.0, 0.0, 0.0],
+                [0.0, -1.0, 0.0],
+            ]
+        )
         self.t_B_C = np.zeros((3, 1))
 
-        # 初始化无人机高度
+        # 无人机高度和位姿
         self.height = 0.8
-
-        # 添加当前无人机位姿
         self.current_drone_pose = None
 
         # 发布器和订阅器
@@ -57,20 +67,14 @@ class ObjectLocalizer:
         self.pose_sub = rospy.Subscriber("/mavros/local_position/pose", PoseStamped, self.drone_pose_callback)
 
     def undistort_pixel(self, pixel_x, pixel_y):
-        """
-        去畸变像素坐标
-        """
-        # 相机内参矩阵
-        K = np.array([[self.fx, 0, self.cx], [0, self.fy, self.cy], [0, 0, 1]])
-
         # 畸变系数
-        dist_coeffs = np.array([self.k1, self.k2, self.p1, self.p2])
+        dist_coeffs = self.dist_coeffs
 
         # 像素坐标
         pts = np.array([[[pixel_x, pixel_y]]], dtype=np.float32)
 
         # 去畸变
-        undistorted_pts = cv2.undistortPoints(pts, K, dist_coeffs, P=K)
+        undistorted_pts = cv2.undistortPoints(pts, self.camera_matrix, dist_coeffs, P=self.camera_matrix)
 
         # 提取去畸变后的像素坐标
         undistorted_x = undistorted_pts[0][0][0]
@@ -80,7 +84,7 @@ class ObjectLocalizer:
 
     def calculate_3d_position(self, pixel_x, pixel_y):
         """
-        根据物体中心的像素坐标、相机内参和无人机高度计算物体在机体坐标系下的三维坐标。
+        根据物体的像素坐标、相机内参和无人机高度计算物体在相机坐标系下的三维坐标。
         """
         # 获取无人机高度（相机高度）
         h = self.height
@@ -88,20 +92,21 @@ class ObjectLocalizer:
         # 去畸变像素坐标
         undistorted_x, undistorted_y = self.undistort_pixel(pixel_x, pixel_y)
 
-        # 计算相对于光心的像素偏移量
-        delta_x = undistorted_x - self.cx
-        delta_y = undistorted_y - self.cy
+        # 计算归一化的相机坐标系方向向量
+        x_c = (undistorted_x - self.cx) / self.fx
+        y_c = (undistorted_y - self.cy) / self.fy
+        z_c = 1
 
-        # 计算偏移角度（弧度）
-        theta_x = math.atan(delta_x / self.fx)
-        theta_y = math.atan(delta_y / self.fy)
+        # 计算参数 t，使得射线与地平面（Y=0）相交
+        t = h / y_c
 
-        # 计算相机坐标系下的 x 和 y（物体位于地平面，z=0）
-        x = h * math.tan(theta_x)
-        y = h * math.tan(theta_y)
-        z = 0  # 物体位于地平面
+        # 计算物体在相机坐标系下的三维坐标
+        X = x_c * t
+        Y = 0  # 地平面高度
+        Z = z_c * t
 
-        position = np.array([x, y, z])
+        position = np.array([X, Y, Z])
+
         return position
 
     def height_callback(self, msg):
@@ -109,8 +114,10 @@ class ObjectLocalizer:
         处理无人机高度信息
         """
         try:
+            # 如果使用 NED 坐标系，z 轴向下为正，需要取反
             self.height = msg.pose.position.z
-            rospy.loginfo(f"Current UAV Height: {self.height} meters")
+
+            rospy.loginfo(f"Current UAV Height: {self.height} meters (NED coordinate system)")
         except Exception as e:
             rospy.logwarn(f"Error processing height: {e}")
 
@@ -120,7 +127,7 @@ class ObjectLocalizer:
         """
         try:
             self.current_drone_pose = msg
-            rospy.logdebug(f"Drone position: x={msg.pose.position.x}, y={msg.pose.position.y}, z={msg.pose.position.z}")
+            rospy.loginfo(f"Drone position: x={msg.pose.position.x}, y={msg.pose.position.y}, z={msg.pose.position.z}")
         except Exception as e:
             rospy.logwarn(f"Error processing drone pose: {e}")
 
@@ -147,14 +154,13 @@ class ObjectLocalizer:
             # 将四元数转换为旋转矩阵（世界系到机体系的转换）
             R_W_B = quaternion_matrix([q.x, q.y, q.z, q.w])[:3, :3]
 
-            # 将位置转换为列向量
+            # 位置向量
             p_B = np.array(position_body).reshape(3, 1)
 
             # 转换到世界坐标系: p_W = R_W_B @ p_B + drone_pos
             p_W = R_W_B @ p_B + drone_pos
 
             return p_W.flatten()
-
         except Exception as e:
             rospy.logerr(f"Error in coordinate transformation: {e}")
             return position_body
@@ -182,11 +188,11 @@ class ObjectLocalizer:
                 center_x = (bbox[0] + bbox[2]) / 2
                 bottom_y = bbox[3]
 
-                # 计算3D位置（机体坐标系）
+                # 计算3D位置（相机坐标系）
                 position = self.calculate_3d_position(center_x, bottom_y)
                 p_C = position.reshape(3, 1)
+                # 转换到机体坐标系
                 p_B = self.R_B_C @ p_C + self.t_B_C
-
                 # 转换到世界坐标系
                 p_W = self.transform_to_world_frame(p_B.flatten())
 
