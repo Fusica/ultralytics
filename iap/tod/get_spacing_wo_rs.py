@@ -13,7 +13,7 @@ actual_tod_height = 1.56
 rospy.init_node('tod_width_pub')
 width_pub = rospy.Publisher('/length', Float32, queue_size=10)
 
-model = YOLO("/home/robot/ultralytics/runs/detect/train102/weights/best.pt")
+model = YOLO("/home/nvidia/ultralytics/runs/detect/train102/weights/best.pt")
 
 bridge = CvBridge()
 last_tod_width = None  # Store the last detected width
@@ -65,12 +65,12 @@ def image_callback(msg):
             box1_center = np.array([(box1_xyxy[0] + box1_xyxy[2]) / 2, (box1_xyxy[1] + box1_xyxy[3]) / 2])
             box2_center = np.array([(box2_xyxy[0] + box2_xyxy[2]) / 2, (box2_xyxy[1] + box2_xyxy[3]) / 2])
 
-            tod_width = np.linalg.norm(box2_center - box1_center)
+            tod_width = abs(box2_center[0] - box1_center[0])
 
             actual_tod_width = actual_tod_height * tod_width / height
 
-            if actual_tod_width >= 1.0:  # Filter out noisy data below 1 meter
-                last_tod_width = actual_tod_width  # Update the last detected width
+            if actual_tod_width >= 1.0: 
+                last_tod_width = actual_tod_width 
 
     # Publish the last known width if no new detection is available or if there is a new value
     if last_tod_width is not None:

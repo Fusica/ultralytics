@@ -45,13 +45,13 @@ class ObjectLocalizer:
         self.cx = self.camera_matrix[0, 2]
         self.cy = self.camera_matrix[1, 2]
 
-        # TODO 相机到机体的变换（相机朝前安装），需要每次校准外参
-        self.R_B_C = [
-            [0.0, 0.0, 1.0],
-            [1.0, 0.0, 0.0],
-            [0.0, -1.0, 0.0],
-        ]
-        self.t_B_C = np.array([[0], [0], [0]])
+        # 相机安装角度（度）
+        self.camera_pitch = 0.0  # 俯仰角
+        self.camera_yaw = 0.0  # 偏航角
+        self.camera_roll = 0.0  # 横滚角
+
+        # 计算相机到机体的变换矩阵
+        self.update_camera_rotation()
 
         # TODO 测试使用，真实环境需要去掉直接调用local_position/pose
         self.height = 0.8
@@ -185,6 +185,34 @@ class ObjectLocalizer:
         except KeyboardInterrupt:
             LOGGER.info("Shutting down")
         cv2.destroyAllWindows()
+
+    def update_camera_rotation(self):
+        """更新相机到机体坐标系的旋转矩阵"""
+        # 将角度转换为弧度
+        pitch = self.camera_pitch * math.pi / 180
+        yaw = self.camera_yaw * math.pi / 180
+        roll = self.camera_roll * math.pi / 180
+
+        # 分别计算三个轴的旋转矩阵
+        Rx = np.array(
+            [[1.0, 0.0, 0.0], [0.0, math.cos(pitch), -math.sin(pitch)], [0.0, math.sin(pitch), math.cos(pitch)]]
+        )
+
+        Ry = np.array([[math.cos(yaw), 0.0, math.sin(yaw)], [0.0, 1.0, 0.0], [-math.sin(yaw), 0.0, math.cos(yaw)]])
+
+        Rz = np.array([[math.cos(roll), -math.sin(roll), 0.0], [math.sin(roll), math.cos(roll), 0.0], [0.0, 0.0, 1.0]])
+
+        # 基础旋转矩阵（相机朝前时的旋转）
+        R_base = np.array(
+            [
+                [0.0, 0.0, 1.0],
+                [1.0, 0.0, 0.0],
+                [0.0, -1.0, 0.0],
+            ]
+        )
+
+        # 组合所有旋转：基础旋转 * 横滚 * 俯仰 * 偏航
+        self.R_B_C = np.matmul(np.matmul(np.matmul(R_base, Rz), Rx), Ry)
 
 
 def main():
