@@ -67,6 +67,9 @@ class ObjectLocalizer:
         self.pose_sub = rospy.Subscriber("/mavros/local_position/pose", PoseStamped, self.drone_pose_callback)
 
     def undistort_pixel(self, pixel_x, pixel_y):
+        # 相机内参矩阵
+        K = self.camera_matrix
+
         # 畸变系数
         dist_coeffs = self.dist_coeffs
 
@@ -74,7 +77,7 @@ class ObjectLocalizer:
         pts = np.array([[[pixel_x, pixel_y]]], dtype=np.float32)
 
         # 去畸变
-        undistorted_pts = cv2.undistortPoints(pts, self.camera_matrix, dist_coeffs, P=self.camera_matrix)
+        undistorted_pts = cv2.undistortPoints(pts, K, dist_coeffs, P=K)
 
         # 提取去畸变后的像素坐标
         undistorted_x = undistorted_pts[0][0][0]
@@ -95,7 +98,7 @@ class ObjectLocalizer:
         # 计算归一化的相机坐标系方向向量
         x_c = (undistorted_x - self.cx) / self.fx
         y_c = (undistorted_y - self.cy) / self.fy
-        z_c = 1
+        z_c = 1  # 归一化后的深度值
 
         # 计算参数 t，使得射线与地平面（Y=0）相交
         t = h / y_c

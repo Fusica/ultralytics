@@ -20,10 +20,11 @@ class GstreamerVideoStreamer:
         device: str = "/dev/video0",
         width: int = 1920,
         height: int = 1080,
-        framerate: int = 60,
+        framerate: int = 10,
         raw_topic: str = "/camera/image_raw",
         compressed_topic: str = "/camera/image_raw/compressed",
-        compress_quality: int = 10,
+        lowres_topic: str = "/camera/image_lowres",
+        compress_quality: int = 50,
     ):
         """初始化视频流处理器
 
@@ -34,6 +35,7 @@ class GstreamerVideoStreamer:
             framerate: 帧率
             raw_topic: 原始图像ROS话题名称
             compressed_topic: 压缩图像ROS话题名称
+            lowres_topic: 低分辨率图像ROS话题名称
             compress_quality: JPEG压缩质量(1-100)
         """
         # 初始化 GStreamer
@@ -43,6 +45,7 @@ class GstreamerVideoStreamer:
         rospy.init_node("gstreamer_video_streamer", anonymous=True)
         self.raw_pub = rospy.Publisher(raw_topic, Image, queue_size=10)
         self.compressed_pub = rospy.Publisher(compressed_topic, CompressedImage, queue_size=10)
+        self.lowres_pub = rospy.Publisher(lowres_topic, Image, queue_size=10)
         self.bridge = CvBridge()
 
         # 创建pipeline
@@ -53,6 +56,12 @@ class GstreamerVideoStreamer:
         self.height = height
         self.framerate = framerate
         self.compress_quality = compress_quality
+
+        # 计算等比例缩放的宽度
+        self.target_height = 518
+        self.scale_ratio = self.target_height / height
+        self.target_width = int(width * self.scale_ratio)
+        rospy.loginfo(f"Low resolution size: {self.target_width}x{self.target_height}")
 
     def _create_pipeline(self) -> str:
         """创建 GStreamer pipeline 字符串"""
@@ -99,9 +108,17 @@ class GstreamerVideoStreamer:
             # 转换颜色空间
             frame = cv2.cvtColor(array, cv2.COLOR_YUV2BGR_I420)
 
+            # 创建低分辨率图像
+            lowres_frame = cv2.resize(frame, (self.target_width, self.target_height), interpolation=cv2.INTER_LINEAR)
+
             # 发布原始图像
             raw_msg = self.bridge.cv2_to_imgmsg(frame, encoding="bgr8")
             self.raw_pub.publish(raw_msg)
+
+            # 发布低分辨率图像
+            lowres_msg = self.bridge.cv2_to_imgmsg(lowres_frame, encoding="bgr8")
+            lowres_msg.header = raw_msg.header
+            self.lowres_pub.publish(lowres_msg)
 
             # 发布压缩图像
             compressed_msg = CompressedImage()
