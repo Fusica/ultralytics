@@ -130,7 +130,9 @@ class ObjectLocalizer:
         """
         try:
             self.current_drone_pose = msg
-            rospy.loginfo(f"Drone position: x={msg.pose.position.x}, y={msg.pose.position.y}, z={msg.pose.position.z}")
+            rospy.loginfo(
+                f"Drone position: x={msg.pose.position.x}, y={msg.pose.position.y}, z={msg.pose.position.z}"
+            )
         except Exception as e:
             rospy.logwarn(f"Error processing drone pose: {e}")
 

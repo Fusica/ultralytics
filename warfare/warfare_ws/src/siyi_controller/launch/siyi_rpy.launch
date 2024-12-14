@@ -1,0 +1,3 @@
+<launch>
+    <node name="siyi_rpy" pkg="siyi_controller" type="siyi_node" output="screen"/>
+</launch>
