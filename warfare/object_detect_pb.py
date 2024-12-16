@@ -22,7 +22,7 @@ class ObjectLocalizer:
         self.bridge = CvBridge()
 
         # 加载YOLO模型并设置推理大小
-        self.yolo = YOLO("/home/jetson/ultralytics/runs/detect/warfare_soldier/weights/best.pt")
+        self.yolo = YOLO("/home/nvidia/ultralytics/runs/detect/warfare_soldier_v2/weights/best.pt")
 
         # 相机内参
         self.camera_matrix = np.array(
@@ -46,10 +46,9 @@ class ObjectLocalizer:
         self.cy = self.camera_matrix[1, 2]
 
         # TODO 相机到机体坐标系变换矩阵（相机朝前，与机体系一致），需要每次校准外参
-        self.t_B_C = np.array([[0], [0], [0]])
+        self.t_B_C = np.array([[0.08], [0], [0.33]])  # [前, 右, 下] 单位：米
 
         # TODO 测试使用，真实环境需要去掉直接调用local_position/pose
-        self.height = 0.66
 
         # 发布器和订阅器
         self.object_pub = rospy.Publisher("/detected_objects", Float32MultiArray, queue_size=10)
@@ -100,7 +99,7 @@ class ObjectLocalizer:
         # 计算归一化的相机坐标系方向向量
         x_c = (undistorted_x - self.cx) / self.fx
         y_c = (undistorted_y - self.cy) / self.fy
-        z_c = 1.0  # 归一化后的深度值
+        z_c = 1.0  # 归一化后的度值
 
         # 归一化方向向量
         ray_dir = np.array([x_c, y_c, z_c])
@@ -157,7 +156,7 @@ class ObjectLocalizer:
         """
         try:
             # 如果使用 NED 坐标系，z 轴向下为正，需要取反
-            self.height = msg.pose.position.z
+            self.height = msg.pose.position.z - self.t_B_C[2]
 
             rospy.loginfo(f"Current UAV Height: {self.height} meters (NED coordinate system)")
         except Exception as e:
@@ -208,7 +207,7 @@ class ObjectLocalizer:
                 max_conf_idx = results.boxes.conf.argmax()
                 det = results.boxes[max_conf_idx]
                 
-                if det.conf >= 0.6:
+                if det.conf >= 0.25:
                     class_id = int(det.cls[0])
                     bbox = det.xyxy[0].cpu().numpy()
                     center_x = (bbox[0] + bbox[2]) / 2
