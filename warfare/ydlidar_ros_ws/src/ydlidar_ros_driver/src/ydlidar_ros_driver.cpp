@@ -179,7 +179,7 @@ int main(int argc, char **argv) {
     ROS_ERROR("%s\n", laser.DescribeError());
   }
 
-  ros::Rate r(30);
+  ros::Rate r(100);
 
   while (ret && ros::ok()) {
     LaserScan scan;

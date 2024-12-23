@@ -2,7 +2,7 @@
 import rospy
 import numpy as np
 import cv2
-from std_msgs.msg import Float32MultiArray, MultiArrayDimension, Float64MultiArray, Float32MultiArray
+from std_msgs.msg import Float32MultiArray, MultiArrayDimension, Float64MultiArray
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge
 from ultralytics import YOLO
@@ -51,7 +51,7 @@ class ObjectLocalizer:
         # TODO 测试使用，真实环境需要去掉直接调用local_position/pose
 
         # 发布器和订阅器
-        self.object_pub = rospy.Publisher("/detected_objects", Float32MultiArray, queue_size=10)
+        self.object_pub = rospy.Publisher("/detected_targets_position", Float32MultiArray, queue_size=10)
         self.coordinates_pub = rospy.Publisher("/camera_coordinates", Point, queue_size=10)
         self.pixel_pub = rospy.Publisher("/pixel_coordinates", Point, queue_size=10)
         self.image_sub = rospy.Subscriber("/camera/image_raw", Image, self.image_callback, queue_size=1)
@@ -206,7 +206,7 @@ class ObjectLocalizer:
             if len(results.boxes) > 0:
                 max_conf_idx = results.boxes.conf.argmax()
                 det = results.boxes[max_conf_idx]
-                
+
                 if det.conf >= 0.25:
                     class_id = int(det.cls[0])
                     bbox = det.xyxy[0].cpu().numpy()
@@ -245,9 +245,10 @@ class ObjectLocalizer:
             # 发布检测结果
             if detections:
                 msg = Float32MultiArray()
+                cols = 4  # [class, x, y, z]
                 msg.layout.dim = [
-                    MultiArrayDimension(label="rows", size=len(detections), stride=4),
-                    MultiArrayDimension(label="cols", size=4, stride=1),
+                    MultiArrayDimension(label="rows", size=len(detections), stride=len(detections) * cols),
+                    MultiArrayDimension(label="cols", size=cols, stride=cols),
                 ]
                 msg.data = [item for sublist in detections for item in sublist]
                 self.object_pub.publish(msg)

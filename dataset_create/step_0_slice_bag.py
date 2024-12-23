@@ -8,9 +8,8 @@ import argparse
 from sensor_msgs.msg import Image
 
 
-def extract_images(bag_path):
+def extract_images(bag_path, output_dir):
     # 创建输出目录
-    output_dir = os.path.join(os.path.dirname(bag_path), "extracted_images")
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
@@ -28,16 +27,23 @@ def extract_images(bag_path):
 
         # 遍历指定topic的所有消息
         for topic, msg, t in bag.read_messages(topics=["/camera/image_raw"]):
+            print(f"Original encoding: {msg.encoding}")  # 查看原始编码
+            print(f"Image size: {msg.width}x{msg.height}")
+            print(f"Raw data size: {len(msg.data)} bytes")
             try:
-                # 将ROS图像消息转换为OpenCV格式
-                cv_image = bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
+                # 保持原始编码格式转换
+                cv_image = bridge.imgmsg_to_cv2(msg, desired_encoding=msg.encoding)
 
-                # 生成输出文件名（使用时间戳）
-                timestamp = t.to_nsec()
-                output_path = os.path.join(output_dir, f"frame_{timestamp}.jpg")
-
-                # 保存图像
-                cv2.imwrite(output_path, cv_image)
+                # 根据原始编码选择保存格式
+                if msg.encoding in ['rgb8', 'bgr8']:
+                    output_path = os.path.join(output_dir, f"frame_{t.to_nsec()}.png")
+                    cv2.imwrite(output_path, cv_image)
+                elif msg.encoding in ['bayer_rggb8', 'bayer_bggr8', 'bayer_gbrg8', 'bayer_grbg8']:
+                    # 对于原始Bayer格式，保存为16位TIFF以保持原始数据
+                    output_path = os.path.join(output_dir, f"frame_{t.to_nsec()}.tiff")
+                    cv2.imwrite(output_path, cv_image, [cv2.IMWRITE_TIFF_COMPRESSION, 1])
+                else:
+                    print(f"未处理的编码格式: {msg.encoding}")
 
                 count += 1
                 if count % 100 == 0:
@@ -47,6 +53,10 @@ def extract_images(bag_path):
                 print(f"处理图像时出错: {str(e)}")
                 continue
 
+            # 直接保存原始数据
+            with open(os.path.join(output_dir, f"frame_{t.to_nsec()}.raw"), 'wb') as f:
+                f.write(msg.data)
+
     print(f"处理完成！共保存了 {count} 帧图像到 {output_dir}")
 
 
@@ -54,6 +64,7 @@ def main():
     # 设置命令行参数
     parser = argparse.ArgumentParser(description="从rosbag中提取图像帧")
     parser.add_argument("bag_path", type=str, help="rosbag文件的路径")
+    parser.add_argument("output_dir", type=str, help="输出图像的目录")
     args = parser.parse_args()
 
     # 检查文件是否存在
@@ -62,7 +73,7 @@ def main():
         return
 
     # 提取图像
-    extract_images(args.bag_path)
+    extract_images(args.bag_path, args.output_dir)
 
 
 if __name__ == "__main__":

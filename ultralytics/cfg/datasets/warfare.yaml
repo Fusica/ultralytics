@@ -8,15 +8,12 @@
 #     └── dota8  ← downloads here (1MB)
 
 # Train/val/test sets as 1) dir: path/to/imgs, 2) file: path/to/imgs.txt, or 3) list: [path/to/imgs1, path/to/imgs2, ..]
-path: ../datasets/Warfare # dataset root dir
-train: images/train # train images (relative to 'path') 4 images
-val: images/val # val images (relative to 'path') 4 images
+path: ../datasets/warfare # dataset root dir
+train: train/images # train images (relative to 'path') 4 images
+val: valid/images # val images (relative to 'path') 4 images
 
-# Classes for DOTA 1.0
 names:
-  0: Building
-  1: Leopard
-  2: M1A2
-  3: M1A3
-  4: Soldier
-  5: Tiger
+  0: fighter_jet
+  1: missile_launch_vehicle
+  2: radar_vehicle
+  3: transport_aircraft

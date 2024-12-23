@@ -6,12 +6,12 @@
 
 ## 工具概述
 
-### 1. step_0_slice_video.py
+### 1a. step_0_slice_video.py
 该脚本用于将视频文件切分为单独的帧图像。
 
 用法：
 ```bash
-python step_0_slice_video.py [video_path] [output_folder] [-i INTERVAL]
+python step_0_slice_bag.py [video_path] [output_folder] [-i INTERVAL]
 ```
 
 参数说明：
@@ -55,12 +55,12 @@ python step_1_revert_file_name.py
 - 脚本会处理 .jpg 和 .txt 文件
 - 文件名格式必须包含 "frame_XXXXXX" 的模式（X为数字）
 
-### 3. step_2_replace_img.py
+### 3. step_2_rename_replace.py
 该脚本用于替换数据集中的图片文件，通常用于将压缩后的图片替换为原始高质量图片。
 
 用法：
 ```bash
-python step_2_replace_img.py
+python step_2_rename_replace.py
 ```
 
 注意事项：
