@@ -2,7 +2,7 @@
 import rospy
 import numpy as np
 import cv2
-from std_msgs.msg import Float32MultiArray, MultiArrayDimension, Float64MultiArray
+from std_msgs.msg import Float32MultiArray, MultiArrayDimension, Float64MultiArray, Float32MultiArray
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge
 from ultralytics import YOLO
@@ -21,10 +21,10 @@ class ObjectLocalizer:
         # 初始化 CV Bridge
         self.bridge = CvBridge()
 
-        # 加载YOLO模型并设置推理大小
-        self.yolo = YOLO("/home/nvidia/ultralytics/runs/detect/warfare_soldier_v2/weights/best.pt")
+        # TODO 加载YOLO模型并设置推理大小
+        self.yolo = YOLO("/home/jetson/ultralytics/runs/detect/warfare_soldier/weights/best.pt")
 
-        # 相机内参
+        # TODO相机内参
         self.camera_matrix = np.array(
             [
                 [1157.46636105, 0, 972.99380136],
@@ -33,6 +33,7 @@ class ObjectLocalizer:
             ]
         )
 
+        # TODO 畸变系数
         self.dist_coeffs = np.array([0.09693897, -0.02769597, 0.00659544, -0.03210938])
         self.k1 = self.dist_coeffs[0]
         self.k2 = self.dist_coeffs[1]
@@ -45,13 +46,14 @@ class ObjectLocalizer:
         self.cx = self.camera_matrix[0, 2]
         self.cy = self.camera_matrix[1, 2]
 
-        # TODO 相机到机体坐标系变换矩阵（相机朝前，与机体系一致），需要每次校准外参
-        self.t_B_C = np.array([[0.08], [0], [0.33]])  # [前, 右, 下] 单位：米
+        # TODO 相机到机体坐标系变换矩阵（相机朝前，与机体系一致），需要每次校准外参，定义为前右下
+        self.t_B_C = np.array([[0], [0], [0]])
 
-        # TODO 测试使用，真实环境需要去掉直接调用local_position/pose
+        # TODO 激光测距仪和相机高度差
+        self.lidar_camera_height_diff = 0.1
 
         # 发布器和订阅器
-        self.object_pub = rospy.Publisher("/detected_targets_position", Float32MultiArray, queue_size=10)
+        self.object_pub = rospy.Publisher("/detected_objects", Float32MultiArray, queue_size=10)
         self.coordinates_pub = rospy.Publisher("/camera_coordinates", Point, queue_size=10)
         self.pixel_pub = rospy.Publisher("/pixel_coordinates", Point, queue_size=10)
         self.image_sub = rospy.Subscriber("/camera/image_raw", Image, self.image_callback, queue_size=1)
@@ -91,7 +93,7 @@ class ObjectLocalizer:
         pitch: 光轴朝前为0，向下为负，向上为正（度）
         """
         # 获取无人机高度（相机高度）
-        h = self.height
+        h = self.height - self.lidar_camera_height_diff
 
         # 去畸变像素坐标
         undistorted_x, undistorted_y = pixel_x, pixel_y
@@ -99,7 +101,7 @@ class ObjectLocalizer:
         # 计算归一化的相机坐标系方向向量
         x_c = (undistorted_x - self.cx) / self.fx
         y_c = (undistorted_y - self.cy) / self.fy
-        z_c = 1.0  # 归一化后的度值
+        z_c = 1.0  # 归一化后的深度值
 
         # 归一化方向向量
         ray_dir = np.array([x_c, y_c, z_c])
@@ -156,7 +158,7 @@ class ObjectLocalizer:
         """
         try:
             # 如果使用 NED 坐标系，z 轴向下为正，需要取反
-            self.height = msg.pose.position.z - self.t_B_C[2]
+            self.height = msg.pose.position.z
 
             rospy.loginfo(f"Current UAV Height: {self.height} meters (NED coordinate system)")
         except Exception as e:
@@ -207,7 +209,7 @@ class ObjectLocalizer:
                 max_conf_idx = results.boxes.conf.argmax()
                 det = results.boxes[max_conf_idx]
 
-                if det.conf >= 0.25:
+                if det.conf >= 0.6:
                     class_id = int(det.cls[0])
                     bbox = det.xyxy[0].cpu().numpy()
                     center_x = (bbox[0] + bbox[2]) / 2
@@ -245,10 +247,9 @@ class ObjectLocalizer:
             # 发布检测结果
             if detections:
                 msg = Float32MultiArray()
-                cols = 4  # [class, x, y, z]
                 msg.layout.dim = [
-                    MultiArrayDimension(label="rows", size=len(detections), stride=len(detections) * cols),
-                    MultiArrayDimension(label="cols", size=cols, stride=cols),
+                    MultiArrayDimension(label="rows", size=len(detections), stride=4),
+                    MultiArrayDimension(label="cols", size=4, stride=1),
                 ]
                 msg.data = [item for sublist in detections for item in sublist]
                 self.object_pub.publish(msg)
