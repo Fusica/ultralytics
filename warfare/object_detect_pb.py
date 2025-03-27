@@ -3,7 +3,7 @@ import rospy
 import numpy as np
 import cv2
 from std_msgs.msg import Float32MultiArray, MultiArrayDimension, Float64MultiArray, Float32MultiArray
-from sensor_msgs.msg import Image
+from sensor_msgs.msg import Image, CompressedImage
 from cv_bridge import CvBridge
 from ultralytics import YOLO
 import logging
@@ -58,6 +58,11 @@ class ObjectLocalizer:
         self.pixel_pub = rospy.Publisher("/pixel_coordinates", Point, queue_size=10)
         self.image_sub = rospy.Subscriber("/camera/image_raw", Image, self.image_callback, queue_size=1)
         self.height_sub = rospy.Subscriber("/mavros/local_position/pose", PoseStamped, self.height_callback)
+
+        # 新增压缩图像发布
+        self.compressed_img_pub = rospy.Publisher("/detection_image/compressed", CompressedImage, queue_size=1)
+        # 新增2D检测框发布
+        self.boxes_pub = rospy.Publisher("/detection_boxes", Float32MultiArray, queue_size=10)
 
         # 相机姿态 (rad)
         self.cam_roll = 0.0
@@ -199,9 +204,22 @@ class ObjectLocalizer:
     def image_callback(self, msg):
         """处理接收到的图像消息"""
         try:
+            # 保存原始图像时间戳
+            original_timestamp = msg.header.stamp
+
             frame = self.bridge.imgmsg_to_cv2(msg, "bgr8")
             results = self.yolo(frame, imgsz=1280)[0]
             detections = []
+
+            # 压缩并发布图像，使用原始图像的时间戳
+            compressed_msg = CompressedImage()
+            compressed_msg.header.stamp = original_timestamp
+            compressed_msg.format = "jpeg"
+            compressed_msg.data = np.array(cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])[1]).tostring()
+            self.compressed_img_pub.publish(compressed_msg)
+
+            # 用于存储2D检测框
+            detection_boxes = []
 
             # 只处理conf最高的一个box
             # 找到置信度最高的检测框
@@ -215,6 +233,18 @@ class ObjectLocalizer:
                     center_x = (bbox[0] + bbox[2]) / 2
                     center_y = (bbox[1] + bbox[3]) / 2
                     bottom_y = bbox[3]
+
+                    # 存储2D检测框 [class_id, x1, y1, x2, y2, confidence]
+                    detection_boxes.append(
+                        [
+                            float(class_id),
+                            float(bbox[0]),  # x1
+                            float(bbox[1]),  # y1
+                            float(bbox[2]),  # x2
+                            float(bbox[3]),  # y2
+                            float(det.conf),  # confidence
+                        ]
+                    )
 
                     # 发布像素坐标
                     pixel_point = Point()
@@ -243,6 +273,23 @@ class ObjectLocalizer:
                             float(body_coordinates[2]),
                         ]
                     )
+
+            # 发布2D检测框，添加时间戳作为第一个浮点数
+            if detection_boxes:
+                boxes_msg = Float32MultiArray()
+                # 添加时间戳信息作为第一个元素
+                timestamp_secs = float(original_timestamp.to_sec())
+
+                boxes_msg.layout.dim = [
+                    MultiArrayDimension(label="rows", size=len(detection_boxes) + 1, stride=6),
+                    MultiArrayDimension(label="cols", size=6, stride=1),
+                ]
+
+                # 首先添加时间戳行 [timestamp, 0, 0, 0, 0, 0]
+                timestamp_row = [timestamp_secs, 0.0, 0.0, 0.0, 0.0, 0.0]
+                boxes_data = timestamp_row + [item for sublist in detection_boxes for item in sublist]
+                boxes_msg.data = boxes_data
+                self.boxes_pub.publish(boxes_msg)
 
             # 发布检测结果
             if detections:
